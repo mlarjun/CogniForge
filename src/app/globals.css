@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-surface: var(--surface);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --background: #0B1120;
+  --foreground: #F8FAFC;
+  --primary: #2DD4BF; /* Electric Teal */
+  --primary-hover: #14B8A6;
+  --secondary: #3B82F6; /* Electric Blue variant */
+  --accent: #F59E0B; /* Warm contrast */
+  --surface: #1E293B; /* Light elevated surface */
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
