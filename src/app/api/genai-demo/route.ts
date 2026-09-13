@@ -1,7 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { NextRequest } from "next/server";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || "" });
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,18 +23,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!process.env.GROQ_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "Missing GEMINI_API_KEY. Please add it to .env.local and restart the server." }),
+        JSON.stringify({ error: "Missing GROQ_API_KEY. Please add it to .env.local and restart the server." }),
         { status: 500, headers: { "Content-Type": "application/json" } }
       );
     }
-
-    // Convert messages array to Gemini format
-    const contents = messages.map((msg: { role: string; content: string }) => ({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: [{ text: msg.content }],
-    }));
 
     // System instruction for the persona
     const systemInstruction = `You are playing the role of a persona in a customer service training simulator.
@@ -45,24 +39,31 @@ You must embody this persona completely. If you are an angry customer, be irate 
 DO NOT break character. You are the customer/client, and the user talking to you is the support agent or sales representative trying to help you.
 Keep your responses relatively brief (1-3 sentences) as if speaking in a real-time chat.`;
 
+    // Format messages for Groq
+    const groqMessages = [
+      { role: "system", content: systemInstruction },
+      ...messages.map((msg: { role: string; content: string }) => ({
+        role: msg.role === "assistant" ? "assistant" : "user",
+        content: msg.content,
+      }))
+    ];
+
     // Create streaming encoder
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash",
-            systemInstruction,
+          const chatCompletion = await groq.chat.completions.create({
+            messages: groqMessages as any,
+            model: "groq/compound-mini",
+            stream: true,
           });
 
-          // Start generation stream
-          const result = await model.generateContentStream({ contents });
-
-          for await (const chunk of result.stream) {
-            const chunkText = chunk.text();
-            if (chunkText) {
-              const dataString = `data: ${JSON.stringify({ text: chunkText })}\n\n`;
+          for await (const chunk of chatCompletion) {
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) {
+              const dataString = `data: ${JSON.stringify({ text: content })}\n\n`;
               controller.enqueue(encoder.encode(dataString));
             }
           }

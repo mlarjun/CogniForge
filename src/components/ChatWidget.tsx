@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useReducer, useRef, useEffect, useCallback } from "react";
+import React, { useReducer, useRef, useEffect, useCallback, useState } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,7 @@ type Action =
   | { type: "TOGGLE" }
   | { type: "SET_LEAD_FORM"; field: "name" | "email"; value: string }
   | { type: "SUBMIT_LEAD" }
+  | { type: "SET_SAVED_LEAD"; lead: Lead }
   | { type: "SET_INPUT"; value: string }
   | { type: "SEND_MESSAGE" }
   | { type: "APPEND_CHUNK"; chunk: string }
@@ -56,16 +57,32 @@ function reducer(state: State, action: Action): State {
         ...state,
         leadForm: { ...state.leadForm, [action.field]: action.value },
       };
-    case "SUBMIT_LEAD":
-      if (!state.leadForm.name.trim() || !state.leadForm.email.trim())
-        return state;
+    case "SUBMIT_LEAD": {
+      const name = state.leadForm.name.trim();
+      const email = state.leadForm.email.trim();
+      if (!name || !email) return state;
+      try {
+        localStorage.setItem("cogniforge_chat_lead", JSON.stringify({ name, email }));
+      } catch {}
       return {
         ...state,
-        lead: { name: state.leadForm.name.trim(), email: state.leadForm.email.trim() },
+        lead: { name, email },
         messages: [
           {
             role: "assistant",
-            content: `Hi ${state.leadForm.name.trim()}! 👋 I'm Arjun's AI assistant. I'd love to help you explore how CogniForge AI can solve your toughest engineering challenges. What are you working on?`,
+            content: `Hi ${name}! 👋 I'm Arjun's AI assistant. I'd love to help you explore how CogniForge AI can solve your engineering challenges. What are you working on?`,
+          },
+        ],
+      };
+    }
+    case "SET_SAVED_LEAD":
+      return {
+        ...state,
+        lead: action.lead,
+        messages: [
+          {
+            role: "assistant",
+            content: `Welcome back, ${action.lead.name}! 👋 How can I help you today?`,
           },
         ],
       };
@@ -84,13 +101,14 @@ function reducer(state: State, action: Action): State {
         isStreaming: true,
         error: null,
       };
-    case "APPEND_CHUNK":
+    case "APPEND_CHUNK": {
       const msgs = [...state.messages];
       const last = msgs[msgs.length - 1];
       if (last && last.role === "assistant") {
         msgs[msgs.length - 1] = { ...last, content: last.content + action.chunk };
       }
       return { ...state, messages: msgs };
+    }
     case "FINISH_STREAM":
       return { ...state, isStreaming: false };
     case "SET_ERROR":
@@ -106,18 +124,33 @@ function reducer(state: State, action: Action): State {
 
 export default function ChatWidget() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [mounted, setMounted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Mark client mounted and check for saved lead
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const saved = localStorage.getItem("cogniforge_chat_lead");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.name && parsed.email) {
+          dispatch({ type: "SET_SAVED_LEAD", lead: parsed });
+        }
+      }
+    } catch {}
+  }, []);
 
   // Scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [state.messages]);
 
-  // Focus input after lead is captured
+  // Focus input when open
   useEffect(() => {
     if (state.lead && state.isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
+      setTimeout(() => inputRef.current?.focus(), 80);
     }
   }, [state.lead, state.isOpen]);
 
@@ -126,7 +159,7 @@ export default function ChatWidget() {
 
     const userContent = state.input.trim();
 
-    // Build conversation history (exclude the empty assistant placeholder)
+    // Filter previous messages (ignoring empty streaming placeholders)
     const conversationHistory: Message[] = state.messages
       .filter((m) => m.content !== "")
       .map((m) => ({ role: m.role, content: m.content }));
@@ -147,7 +180,7 @@ export default function ChatWidget() {
       });
 
       if (!response.ok) {
-        const err = await response.json();
+        const err = await response.json().catch(() => ({}));
         dispatch({ type: "SET_ERROR", error: err.error || "Request failed." });
         return;
       }
@@ -155,7 +188,7 @@ export default function ChatWidget() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       if (!reader) {
-        dispatch({ type: "SET_ERROR", error: "No response stream." });
+        dispatch({ type: "SET_ERROR", error: "No response stream from server." });
         return;
       }
 
@@ -180,14 +213,14 @@ export default function ChatWidget() {
               dispatch({ type: "APPEND_CHUNK", chunk: parsed.text });
             }
           } catch {
-            // ignore partial JSON
+            // ignore partial JSON chunk
           }
         }
       }
 
       dispatch({ type: "FINISH_STREAM" });
     } catch {
-      dispatch({ type: "SET_ERROR", error: "Network error. Please try again." });
+      dispatch({ type: "SET_ERROR", error: "Network error. Please check your connection." });
     }
   }, [state.input, state.isStreaming, state.lead, state.messages]);
 
@@ -203,10 +236,10 @@ export default function ChatWidget() {
     dispatch({ type: "SUBMIT_LEAD" });
   };
 
-  // ─── Render ──────────────────────────────────────────────────────────────
+  if (!mounted) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end pointer-events-auto">
       {/* Chat Panel */}
       {state.isOpen && (
         <div
@@ -217,13 +250,16 @@ export default function ChatWidget() {
           {/* Header */}
           <div className="bg-gradient-to-r from-primary/20 to-secondary/20 border-b border-white/5 p-4 flex justify-between items-center flex-shrink-0">
             <div className="flex items-center gap-3">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
-              <span className="font-semibold text-sm">Arjun&apos;s AI Assistant</span>
+              <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+              <div>
+                <span className="font-semibold text-sm block leading-tight text-white">CogniForge AI</span>
+                <span className="text-xs text-gray-400">Arjun&apos;s Assistant (Online)</span>
+              </div>
             </div>
             <button
               id="chat-close-btn"
               onClick={() => dispatch({ type: "TOGGLE" })}
-              className="text-gray-400 hover:text-white transition-colors"
+              className="text-gray-400 hover:text-white transition-colors p-1"
               aria-label="Close chat"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -234,17 +270,17 @@ export default function ChatWidget() {
 
           {/* Lead Capture Gate */}
           {!state.lead ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-6">
-              <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+              <div className="w-14 h-14 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mb-3">
+                <svg className="w-7 h-7 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
                 </svg>
               </div>
-              <h3 className="text-white font-bold text-lg mb-1">Chat with Arjun&apos;s AI</h3>
-              <p className="text-gray-400 text-sm text-center mb-6">
-                Tell us who you are and we&apos;ll connect you instantly.
+              <h3 className="text-white font-bold text-base mb-1">Chat with Arjun&apos;s AI</h3>
+              <p className="text-gray-400 text-xs mb-5 max-w-xs">
+                Enter your details to start chatting directly with CogniForge&apos;s AI assistant.
               </p>
-              <form id="lead-capture-form" onSubmit={handleLeadSubmit} className="w-full space-y-3">
+              <form id="lead-capture-form" onSubmit={handleLeadSubmit} className="w-full space-y-3 text-left">
                 <input
                   id="lead-name-input"
                   type="text"
@@ -252,7 +288,7 @@ export default function ChatWidget() {
                   value={state.leadForm.name}
                   onChange={(e) => dispatch({ type: "SET_LEAD_FORM", field: "name", value: e.target.value })}
                   required
-                  className="w-full bg-background border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors text-white placeholder-gray-500"
+                  className="w-full bg-background border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors text-white placeholder-gray-500"
                 />
                 <input
                   id="lead-email-input"
@@ -261,12 +297,12 @@ export default function ChatWidget() {
                   value={state.leadForm.email}
                   onChange={(e) => dispatch({ type: "SET_LEAD_FORM", field: "email", value: e.target.value })}
                   required
-                  className="w-full bg-background border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors text-white placeholder-gray-500"
+                  className="w-full bg-background border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-primary transition-colors text-white placeholder-gray-500"
                 />
                 <button
                   id="lead-submit-btn"
                   type="submit"
-                  className="w-full bg-primary hover:bg-primary-hover text-background font-bold py-3 rounded-xl transition-all text-sm shadow-[0_0_15px_rgba(45,212,191,0.3)]"
+                  className="w-full bg-primary hover:bg-primary-hover text-background font-bold py-2.5 rounded-xl transition-all text-sm shadow-[0_0_15px_rgba(45,212,191,0.3)] cursor-pointer"
                 >
                   Start Chatting →
                 </button>
@@ -279,14 +315,16 @@ export default function ChatWidget() {
                 {state.messages.map((msg, i) => (
                   <div
                     key={i}
-                    className={`text-sm p-3 rounded-2xl max-w-[85%] ${
+                    className={`text-sm p-3 rounded-2xl max-w-[85%] leading-relaxed ${
                       msg.role === "user"
                         ? "bg-primary/20 border border-primary/30 text-white self-end rounded-tr-sm"
-                        : "bg-surface border border-white/10 text-gray-200 self-start rounded-tl-sm"
+                        : "bg-surface border border-white/10 text-gray-200 self-start rounded-tl-sm whitespace-pre-wrap"
                     }`}
                   >
-                    {msg.content || (
-                      <span className="flex gap-1 items-center h-4">
+                    {msg.content ? (
+                      msg.content
+                    ) : (
+                      <span className="flex gap-1 items-center h-4 py-1">
                         <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                         <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
                         <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
@@ -295,7 +333,7 @@ export default function ChatWidget() {
                   </div>
                 ))}
                 {state.error && (
-                  <div className="text-red-400 text-xs text-center bg-red-400/10 border border-red-400/20 rounded-xl p-2">
+                  <div className="text-red-400 text-xs text-center bg-red-400/10 border border-red-400/20 rounded-xl p-2.5">
                     {state.error}
                   </div>
                 )}
@@ -319,7 +357,7 @@ export default function ChatWidget() {
                   id="chat-send-btn"
                   onClick={sendMessage}
                   disabled={state.isStreaming || !state.input.trim()}
-                  className="w-10 h-10 bg-primary hover:bg-primary-hover rounded-full flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+                  className="w-10 h-10 bg-primary hover:bg-primary-hover rounded-full flex items-center justify-center transition-all disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 cursor-pointer"
                   aria-label="Send message"
                 >
                   <svg className="w-4 h-4 text-background" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -336,7 +374,7 @@ export default function ChatWidget() {
       <button
         id="chat-toggle-btn"
         onClick={() => dispatch({ type: "TOGGLE" })}
-        className="w-14 h-14 bg-primary hover:bg-primary-hover rounded-full shadow-[0_0_20px_rgba(45,212,191,0.4)] flex items-center justify-center transition-all duration-300 hover:scale-110 float-right group"
+        className="w-14 h-14 bg-primary hover:bg-primary-hover rounded-full shadow-[0_0_20px_rgba(45,212,191,0.4)] flex items-center justify-center transition-all duration-300 hover:scale-110 flex-shrink-0 cursor-pointer group"
         aria-label="Toggle chat"
       >
         {!state.isOpen ? (
