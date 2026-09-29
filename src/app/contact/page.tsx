@@ -7,14 +7,40 @@ export default function ContactPage() {
     name: '', email: '', company: '', service: 'rag-chatbot', description: '', budget: ''
   });
 
-  const [status, setStatus] = useState<"idle" | "submitting" | "success">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStatus("submitting");
-    setTimeout(() => {
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...formData,
+          source: "contact-page",
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send message. Please try again or reach out via WhatsApp.");
+      }
+
       setStatus("success");
-    }, 1500);
+      setFormData({
+        name: '', email: '', company: '', service: 'rag-chatbot', description: '', budget: ''
+      });
+    } catch (err: unknown) {
+      setStatus("error");
+      setErrorMessage(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -122,6 +148,18 @@ export default function ContactPage() {
                       ))}
                     </div>
                   </div>
+
+                  {status === "error" && errorMessage && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex items-start gap-3">
+                      <svg className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <span className="font-semibold block">Failed to send inquiry</span>
+                        <span>{errorMessage}</span>
+                      </div>
+                    </div>
+                  )}
 
                   <button type="submit" disabled={status === "submitting"} className="w-full py-4 bg-primary hover:bg-primary-hover text-background font-bold text-lg rounded-xl transition-all shadow-[0_0_20px_rgba(45,212,191,0.3)] hover:shadow-[0_0_30px_rgba(45,212,191,0.5)] disabled:opacity-70 disabled:cursor-not-allowed mt-4">
                     {status === "submitting" ? "Sending Request..." : "Submit Project Inquiry"}

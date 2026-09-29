@@ -233,7 +233,24 @@ export default function ChatWidget() {
 
   const handleLeadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const name = state.leadForm.name.trim();
+    const email = state.leadForm.email.trim();
+    if (!name || !email) return;
+
     dispatch({ type: "SUBMIT_LEAD" });
+
+    // Send lead notification to owner email in background
+    fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        email,
+        source: "chat-widget",
+      }),
+    }).catch((err) => {
+      console.warn("Failed to notify lead to server:", err);
+    });
   };
 
   if (!mounted) return null;
